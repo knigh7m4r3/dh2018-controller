@@ -1,0 +1,209 @@
+<!doctype html> 
+<html>
+  <head> 
+    <title> Presentation </title>
+		<meta charset="utf-8">
+		<meta content="width=device-width, user-scalable=no, minimum-slace=1.0, maximum-scale=1.0">
+
+		<style>
+			*{
+				margin:0px;
+				padding:0px;
+				overflow:hidden;
+			}
+		</style>
+    <script src="./three.js-master/build/three.js"></script>
+		<script src="./three.js-master/examples/js/loaders/GLTFLoader.js"></script>
+    <script>
+			var currentModel = "brunnen_gltf/brunnen_clean.gltf";
+			var newModel = "brunnen_gltf/brunnen_clean.gltf";
+
+			var pivot;
+			var scene;
+			function checkState(){
+				var xhttp = new XMLHttpRequest();
+				xhttp.onreadystatechange = function() {
+					if (this.readyState == 4 && this.status == 200){
+						newModel = xhttp.responseText;
+					}
+				}
+				xhttp.open("GET", "ajax_info.txt", true);
+				xhttp.send();
+			}
+			
+			window.setInterval(checkState, 1000);
+
+			var camera;
+			var renderer;
+			var pivX = "0";
+			var pivY = "0"; 
+			var pivZ = "0";
+
+			var nextX = "0";
+			var nextY = "0";
+			var nextZ = "0";
+
+      window.addEventListener("load", function (){
+          renderer= new THREE.WebGLRenderer({
+              canvas: document.getElementById("threejs"),
+              antialias: true,
+            });
+   
+          var id;
+          var msg = {
+            type : "", 
+            id	: 0,
+            rotX	: 0,
+            rotY	: 0,	
+						rotZ  : 0
+          };
+
+          function getRandomInt(min, max) {
+            min = Math.ceil(min);
+            max = Math.floor(max);
+            return Math.floor(Math.random() * (max - min)) + min;
+          }
+
+          function getMesh(id) {
+            var sElements = scene.children;
+            let returnElement = undefined;
+            sElements.some( element => {
+              //if (element.type == "Mesh") {
+                returnElement = element;
+                return element.name === id;
+             // }
+            });    
+            return returnElement;
+          }
+
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          scene = new THREE.Scene();
+          camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 1000);
+//					camera.quaternion = new THREE.Quaternion(0,0,0,0);
+					camera.position.set(0, 2, 15);
+					
+          var light = new THREE.HemisphereLight( 0xbbbbff, 0x444422);
+
+          scene.add(light);
+          light = new THREE.DirectionalLight(0xffffff);
+          light.position.set(0,1,0);
+					scene.add(light);
+          scene.add(camera);
+
+					//Background
+					var path = "skyboxsun25deg/";
+					var format = ".jpg";
+					var envMap = new THREE.CubeTextureLoader().load([
+							path + "px" + format, path + "nx" + format, 
+							path + "py" + format, path + "ny" + format, 
+							path + "pz" + format, path + "nz" + format
+					]);
+					scene.background = envMap;
+					const ws = new WebSocket('ws://' + location.hostname + ':2000');
+          //const ws = new WebSocket('ws://192.168.1.1:2000');
+      
+          ws.onopen = function open() { 
+            console.log('open');
+            ws.send('presenter');
+          } 
+
+          ws.onmessage = function incoming(data) {
+            var msg = JSON.parse(data.data);
+            if ( msg.type == "info" ) { 
+              id = msg.id;
+            }
+            if (msg.type == "create") {
+							console.log("got create - #ChildrenInScene", scene.children.length);
+							if(scene.children != null && scene.children.length == 3){
+                console.log(msg);
+							}else{
+								console.log("resetting current model");
+								pivot.rotation = new THREE.Vector3(0,0,0);
+								pivot.position = new THREE.Vector3(0,0,0);
+							}
+            }
+            if (msg.type == "update") {
+							if(scene.children.length > 2){			
+								nextX = msg.rotX * 0.01745329252;
+								nextY = msg.rotY * 0.01745329252;
+								nextZ = msg.rotZ * 0.01745329252;	
+							}
+            }
+          }
+					
+					renderer.gammaOutput=true;
+					renderer.gammaInput=true;
+				
+          var renderLoop = function() {
+						
+
+						if(pivot != null){
+							var euler = new THREE.Euler(nextX, nextY, nextZ, "XYZ");
+							pivot.setRotationFromEuler(euler);
+						}
+						if(currentModel != newModel){
+							currentModel = newModel;
+							console.log("try to change!");
+							var loader = new THREE.GLTFLoader();
+							loader.load(currentModel, function(gltf){
+								gltf.scene.traverse(function (child){
+									if ( child.isMesh ) {
+										child.material.envMap = envMap;
+									}
+								});
+
+							try{
+								var tmpString = "http://" + location.hostname + "/" + newModel.substring(0, newModel.length - 5) + "json";
+
+								//HTTP-Request um JSON zu laden....
+								var xmlHTTP = new XMLHttpRequest();
+								if(xmlHTTP != null){
+									xmlHTTP.open("GET", tmpString, false);
+									xmlHTTP.send(null);
+									var jsonFile = xmlHTTP.responseText;
+									var rotData = JSON.parse(jsonFile);
+									console.log(rotData);
+									gltf.scene.rotation.x = rotData.rotX * 0.01745329252;
+									gltf.scene.rotation.y = rotData.rotY * 0.01745329252;
+									gltf.scene.rotation.z = rotData.rotZ * 0.01745329252;
+								}
+							}catch(e){
+								alert(e);
+								console.log(e.name+"\t"+e.message);
+							}
+								scene.remove(pivot);
+								gltf.scene.name = msg.id;
+								var box = new THREE.Box3().setFromObject(gltf.scene);
+								box.center(gltf.scene.position);
+								gltf.scene.position.multiplyScalar(-1);
+								pivot = new THREE.Group();
+								scene.add(pivot);
+								pivot.add(gltf.scene);
+								console.log("loaded");
+								nextX = "0";
+								nextY = "0";
+								nextZ = "0";
+							});
+
+						}
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(renderLoop);
+          };
+					window.addEventListener('resize', onWindowResize, false);
+          requestAnimationFrame(renderLoop);
+					
+      });
+
+      function onWindowResize(){
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			};
+
+    </script>
+  </head>
+  <body>
+    <canvas id="threejs" style="width:1500px;height:1000px"/>
+  </body>
+</html>
