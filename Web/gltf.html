@@ -18,6 +18,15 @@
 			var currentModel = "brunnen_gltf/brunnen_clean.gltf";
 			var newModel = "brunnen_gltf/brunnen_clean.gltf";
 
+			var currentPosModel = 0;
+			var oldPosModel = 0;
+
+			var models = "";
+			var oldModels = "";
+			var pivotMeshes;
+
+			var isChanging = false;
+
 			var pivot;
 			var scene;
 			function checkState(){
@@ -25,9 +34,14 @@
 				xhttp.onreadystatechange = function() {
 					if (this.readyState == 4 && this.status == 200){
 						newModel = xhttp.responseText;
+						models = newModel.split("\n");
+						newModel = models[0];
+						if(models[models.length-1] == ""){
+							models.splice(models.length-1, 1);
+						}
 					}
 				}
-				xhttp.open("GET", "ajax_info.txt", true);
+				xhttp.open("GET", "ajax_info.txt?rand="+ new Date().getTime(), true);
 				xhttp.send();
 			}
 			
@@ -42,6 +56,9 @@
 			var nextX = "0";
 			var nextY = "0";
 			var nextZ = "0";
+			var nextZoom = "0";
+			var nextXPos = "0";
+			var nextYPos = "0";
 
       window.addEventListener("load", function (){
           renderer= new THREE.WebGLRenderer({
@@ -55,7 +72,11 @@
             id	: 0,
             rotX	: 0,
             rotY	: 0,	
-						rotZ  : 0
+						rotZ  : 0,
+						zoom	:	0,
+						currentPosModel : 0,
+						posX	:	0,
+						posY	:	0
           };
 
           function getRandomInt(min, max) {
@@ -68,10 +89,8 @@
             var sElements = scene.children;
             let returnElement = undefined;
             sElements.some( element => {
-              //if (element.type == "Mesh") {
-                returnElement = element;
-                return element.name === id;
-             // }
+              returnElement = element;
+              return element.name === id;
             });    
             return returnElement;
           }
@@ -79,7 +98,6 @@
           renderer.setSize(window.innerWidth, window.innerHeight);
           scene = new THREE.Scene();
           camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 1000);
-//					camera.quaternion = new THREE.Quaternion(0,0,0,0);
 					camera.position.set(0, 2, 15);
 					
           var light = new THREE.HemisphereLight( 0xbbbbff, 0x444422);
@@ -100,7 +118,6 @@
 					]);
 					scene.background = envMap;
 					const ws = new WebSocket('ws://' + location.hostname + ':2000');
-          //const ws = new WebSocket('ws://192.168.1.1:2000');
       
           ws.onopen = function open() { 
             console.log('open');
@@ -123,10 +140,21 @@
 							}
             }
             if (msg.type == "update") {
-							if(scene.children.length > 2){			
+							if(scene.children.length > 2){	
 								nextX = msg.rotX * 0.01745329252;
 								nextY = msg.rotY * 0.01745329252;
-								nextZ = msg.rotZ * 0.01745329252;	
+								nextZ = msg.rotZ * 0.01745329252;
+								nextXPos = msg.posX * -1;
+								nextYPos = msg.posY * -1;
+								nextZoom = msg.zoom;
+								if(isChanging == false && msg.currentPosModel != 0 ){
+									isChanging = true;	
+									currentPosModel = ((currentPosModel*1 + 1* msg.currentPosModel) + models.length*2) % models.length*1;
+									newModel = models[currentPosModel];
+									currentModel = "";
+									console.log(currentModel+"\tchanged to:\t"+newModel+"\t"+currentPosModel+"\t"+models);
+									new Notification("Modell wechselt in kürze...");
+								}
 							}
             }
           }
@@ -140,9 +168,20 @@
 						if(pivot != null){
 							var euler = new THREE.Euler(nextX, nextY, nextZ, "XYZ");
 							pivot.setRotationFromEuler(euler);
+							pivot.position.x += nextXPos;
+							pivot.position.y += nextYPos;
+							pivot.scale.x = pivot.scale.y = pivot.scale.z += 1*nextZoom;
+							nextZoom = 0;
+							nextXPos = nextYPos = 0;
+
 						}
-						if(currentModel != newModel){
+						if(currentModel != newModel || models.toString().hashCode() != oldModels.toString().hashCode()){
 							currentModel = newModel;
+							if(oldModels.toString().hashCode() != models.toString().hashCode()){
+								currentPosModels = 0;
+								currentModel = models[0];
+								oldModels = models;	
+							}
 							console.log("try to change!");
 							var loader = new THREE.GLTFLoader();
 							loader.load(currentModel, function(gltf){
@@ -152,25 +191,29 @@
 									}
 								});
 
-							try{
-								var tmpString = "http://" + location.hostname + "/" + newModel.substring(0, newModel.length - 5) + "json";
 
-								//HTTP-Request um JSON zu laden....
-								var xmlHTTP = new XMLHttpRequest();
-								if(xmlHTTP != null){
-									xmlHTTP.open("GET", tmpString, false);
-									xmlHTTP.send(null);
-									var jsonFile = xmlHTTP.responseText;
-									var rotData = JSON.parse(jsonFile);
-									console.log(rotData);
-									gltf.scene.rotation.x = rotData.rotX * 0.01745329252;
-									gltf.scene.rotation.y = rotData.rotY * 0.01745329252;
-									gltf.scene.rotation.z = rotData.rotZ * 0.01745329252;
+								var rotX = 0, rotY = 0, rotZ = 0;
+								try{
+									var tmpString = "http://" + location.hostname + "/" + models[currentPosModel].substring(0, models[currentPosModel].length - 4) + "json?rand="+new Date().getTime();
+									console.log("try to load json from:\t"+tmpString);
+	
+									//HTTP-Request um JSON zu laden....
+									var xmlHTTP = new XMLHttpRequest();
+									if(xmlHTTP != null){
+										xmlHTTP.open("GET", tmpString, false);
+										xmlHTTP.send(null);
+										var jsonFile = xmlHTTP.responseText;
+										var rotData = JSON.parse(jsonFile);
+										console.log(rotData);
+										rotX = rotData.rotX * 0.01745329252;
+										rotY = rotData.rotY * 0.01745329252;
+										rotZ = rotData.rotZ * 0.01745329252;
+	 								}
+								}catch(e){
+									alert(e);
+									console.log(e.name+"\t"+e.message);
 								}
-							}catch(e){
-								alert(e);
-								console.log(e.name+"\t"+e.message);
-							}
+								
 								scene.remove(pivot);
 								gltf.scene.name = msg.id;
 								var box = new THREE.Box3().setFromObject(gltf.scene);
@@ -179,14 +222,41 @@
 								pivot = new THREE.Group();
 								scene.add(pivot);
 								pivot.add(gltf.scene);
+								pivot.position.y += 2;
+								gltf.scene.rotation.x = rotX;
+								gltf.scene.rotation.y = rotY;
+								gltf.scene.rotation.z = rotZ;
 								console.log("loaded");
 								nextX = "0";
 								nextY = "0";
 								nextZ = "0";
+								nextZoom = "0";
+	
+								//Liste neu erzeugen
+								scene.remove(pivotMeshes);
+								pivotMeshes = new THREE.Group();
+								scene.add(pivotMeshes);
+								for( x in models){
+									if(models[x] == ""){
+										continue;
+									}
+									console.log("cube for:\t"+models[x]);
+									var texture = new THREE.TextureLoader().load('http://' + location.hostname + "/" + models[x].substring(0, models[x].length - 4) + 'png');
+									var geometry = new THREE.PlaneBufferGeometry(3,3,3,3);
+									var material = new THREE.MeshBasicMaterial( { map: texture, transparent : true, opacity : 0.5 } );
+									if (currentPosModel == x ){
+										material.transparent = false;
+										material.opacity = 1;
+									}
+									//var material = new THREE.MeshStandardMaterial({color : new THREE.Color(0x110111)});
+									mesh = new THREE.Mesh( geometry, material );
+									mesh.position.x = ((x*1+1) * 4) - (models.length * 2  + 2);
+									mesh.position.y = -6;
+									pivotMeshes.add(mesh);
+								}
+								isChanging = false;
 							});
-
 						}
-
             renderer.render(scene, camera);
             requestAnimationFrame(renderLoop);
           };
@@ -200,6 +270,16 @@
 				camera.updateProjectionMatrix();
 				renderer.setSize(window.innerWidth, window.innerHeight);
 			};
+
+			String.prototype.hashCode = function(){
+		    var hash = 0;
+    		for (var i = 0; i < this.length; i++) {
+        	var character = this.charCodeAt(i);
+	        hash = ((hash<<5)-hash)+character;
+	        hash = hash & hash; // Convert to 32bit integer
+		    }
+		    return hash;
+			}
 
     </script>
   </head>
